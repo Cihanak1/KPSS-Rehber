@@ -1,26 +1,144 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+  }
+  body {
+    background-color: #09090b;
+    color: #fafafa;
+    overflow-x: hidden;
+    min-height: 100dvh;
+    touch-action: manipulation;
+  }
+  *:focus-visible {
+    outline: 2px solid #f59e0b;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ============================================================
+   Dokunmatik & Güvenli Alan (Safe Area & Touch Ergonomics)
+   ============================================================ */
+.safe-top {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+.safe-bottom {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* ============================================================
+   A4 / PDF Yazdırma Stilleri (Print CSS)
+   ============================================================ */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+  }
+
+  html, body {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    overflow: visible !important;
+  }
+
+  /* Modal dışındaki tüm arayüz bileşenlerini gizle */
+  header, footer, nav, main > *:not([role="dialog"]), .safe-top {
+    display: none !important;
+  }
+
+  /* Dialog kapsayıcısını tam sayfa kağıt akışına al */
+  [role="dialog"] {
+    position: static !important;
+    inset: auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  /* Arka plan karartmasını (backdrop) gizle */
+  [role="dialog"] > div:first-child {
+    display: none !important;
+  }
+
+  /* Modal kutusunun gölge ve koyu arkaplanını sıfırla */
+  [role="dialog"] > div:last-child {
+    max-width: 100% !important;
+    max-height: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  /* Ekrana özel modal header/footer butonlarını gizle */
+  [role="dialog"] .border-b,
+  [role="dialog"] .border-t {
+    display: none !important;
+  }
+
+  #summary-sheet-print-container {
+    overflow: visible !important;
+    background-color: #ffffff !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  /* Kartların sayfa ortasından bölünmesini engelle */
+  #summary-sheet-print-container section {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    border: 1px solid #cbd5e1 !important;
+    background-color: #ffffff !important;
+    box-shadow: none !important;
+    margin-bottom: 12px !important;
+    border-radius: 8px !important;
+  }
+
+  /* Yüksek kontrastlı metin renkleri */
+  #summary-sheet-print-container h1,
+  #summary-sheet-print-container h2,
+  #summary-sheet-print-container h3,
+  #summary-sheet-print-container p,
+  #summary-sheet-print-container span,
+  #summary-sheet-print-container li,
+  #summary-sheet-print-container div {
+    color: #0f172a !important;
+    text-shadow: none !important;
+  }
+
+  /* İç kutucukların arkaplanını açık gri/mürekkep dostu yap */
+  #summary-sheet-print-container [class*="bg-amber-500/5"],
+  #summary-sheet-print-container [class*="bg-rose-500/5"],
+  #summary-sheet-print-container [class*="bg-zinc-900"],
+  #summary-sheet-print-container [class*="bg-zinc-950"] {
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+
+  /* İkon renklerini baskı için optimize et */
+  #summary-sheet-print-container svg {
+    color: #334155 !important;
+  }
 }
