@@ -1,11 +1,12 @@
-﻿import { ParetoRecommendation, Topic, TopicProgress, TopicStatus } from "@/types";
+import { ParetoRecommendation, Topic, TopicProgress, TopicStatus } from "@/types";
 import { SUBJECTS } from "@/data/curriculum";
 
 // 80/20 Pareto onceliklendirme skoru
-// Yuksek OSYM agirligi + Yuksek zorluk + Tamamlanmamis = oncelikli
+// Yuksek OSYM agirligi + Yuksek zorluk + Tamamlanmamis + Zorlanilan Ders = oncelikli
 function calculateScore(
   topic: Topic,
-  progress: TopicProgress | undefined
+  progress: TopicProgress | undefined,
+  isWeakSubject = false
 ): number {
   const osmyWeight = topic.osmyWeight;
   const difficulty = progress?.difficulty ?? 3;
@@ -18,23 +19,28 @@ function calculateScore(
     "completed": 0,
   };
 
-  return osmyWeight * 2.5 + difficulty * 2.0 + statusBonus[status];
+  const weakSubjectBonus = isWeakSubject ? 3.0 : 0;
+
+  return osmyWeight * 2.5 + difficulty * 2.0 + statusBonus[status] + weakSubjectBonus;
 }
 
 export function getParetoRecommendations(
   topicProgress: Record<string, TopicProgress>,
-  limit = 5
+  limit = 5,
+  weakSubjectIds: string[] = []
 ): ParetoRecommendation[] {
   const recommendations: ParetoRecommendation[] = [];
 
   for (const subject of SUBJECTS) {
+    const isWeak = weakSubjectIds.includes(subject.id);
+
     for (const topic of subject.topics) {
       const progress = topicProgress[topic.id];
 
       // Tamamlanan konulari listeden cikar
       if (progress?.status === "completed") continue;
 
-      const score = calculateScore(topic, progress);
+      const score = calculateScore(topic, progress, isWeak);
       const status: TopicStatus = progress?.status ?? "not-started";
 
       let reason = "";
@@ -44,6 +50,10 @@ export function getParetoRecommendations(
         reason = "Devam eden konu";
       } else {
         reason = "Henüz başlanmadı";
+      }
+
+      if (isWeak) {
+        reason += " · Zorlandığın ders (+3.0 öncelik)";
       }
 
       if (topic.osmyWeight >= 8) {

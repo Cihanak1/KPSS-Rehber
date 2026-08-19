@@ -1,9 +1,24 @@
 "use client";
 
 import { useCallback, useState, useSyncExternalStore } from "react";
-import { DailySession, KpssStore, LeitnerBox, TopicProgress, TopicStatus, DifficultyLevel } from "@/types";
+import {
+  DailyPlanRecord,
+  DailySession,
+  KpssStore,
+  LeitnerBox,
+  TopicProgress,
+  TopicStatus,
+  DifficultyLevel,
+  UserProfile,
+} from "@/types";
+import {
+  calculateUpdatedStreak,
+  generateDailyPlanForDate,
+  getTodayDateString,
+} from "@/lib/dailyPlanner";
 
-const STORAGE_KEY = "kpss-dashboard-v1";
+const STORAGE_KEY = "kpss-dashboard-v2";
+const LEGACY_STORAGE_KEY = "kpss-dashboard-v1";
 
 const LEITNER_INTERVALS: Record<LeitnerBox, number> = {
   0: 1,
@@ -34,6 +49,8 @@ function defaultProgress(topicId: string): TopicProgress {
 
 function defaultStore(): KpssStore {
   return {
+    userProfile: null,
+    dailyPlans: {},
     topicProgress: {},
     examDate: "2026-10-05",
     pomodoroSettings: {
@@ -50,8 +67,17 @@ function loadStore(): KpssStore {
   if (typeof window === "undefined") return defaultStore();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultStore();
-    return { ...defaultStore(), ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { ...defaultStore(), ...parsed };
+    }
+    // Geriye dönük uyumluluk: v1'den veri aktar
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      const parsedLegacy = JSON.parse(legacyRaw);
+      return { ...defaultStore(), ...parsedLegacy };
+    }
+    return defaultStore();
   } catch {
     return defaultStore();
   }
@@ -79,6 +105,133 @@ export function useKpssStore() {
       return next;
     });
   }, []);
+
+  // ─── Profil İşlemleri ─────────────────────────────────────────
+
+  const saveUserProfile = useCallback(
+    (profile: UserProfile) => {
+      persistUpdate((prev) => {
+        const today = getTodayDateString();
+        // Eğer bugünün planı henüz yoksa hemen oluştur
+        const existingPlan = prev.dailyPlans[today];
+        const updatedPlans = { ...prev.dailyPlans };
+        if (!existingPlan) {
+          updatedPlans[today] = generateDailyPlanForDate(today, prev.topicProgress, profile);
+        }
+        return {
+          ...prev,
+          userProfile: profile,
+          dailyPlans: updatedPlans,
+        };
+      });
+    },
+    [persistUpdate]
+  );
+
+  const updateUserProfile = useCallback(
+    (updates: Partial<UserProfile>) => {
+      persistUpdate((prev) => {
+        if (!prev.userProfile) return prev;
+        const updatedProfile = { ...prev.userProfile, ...updates };
+        return {
+          ...prev,
+          userProfile: updatedProfile,
+        };
+      });
+    },
+    [persistUpdate]
+  );
+
+  const resetUserProfile = useCallback(() => {
+    persistUpdate((prev) => ({
+      ...prev,
+      userProfile: null,
+    }));
+  }, [persistUpdate]);
+
+  // ─── Günlük Plan ve Görev Yönetimi (Persistence) ──────────────
+
+  const getTodayPlan = useCallback((): DailyPlanRecord => {
+    const today = getTodayDateString();
+    if (store.dailyPlans[today]) {
+      return store.dailyPlans[today];
+    }
+    // State'te henüz yoksa anlık üret
+    return generateDailyPlanForDate(today, store.topicProgress, store.userProfile);
+  }, [store.dailyPlans, store.topicProgress, store.userProfile]);
+
+  const toggleDailyTask = useCallback(
+    (date: string, taskId: string) => {
+      persistUpdate((prev) => {
+        const plan =
+          prev.dailyPlans[date] ||
+          generateDailyPlanForDate(date, prev.topicProgress, prev.userProfile);
+
+        const updatedTasks = plan.tasks.map((task) => {
+          if (task.id === taskId) {
+            const nextCompleted = !task.isCompleted;
+            return {
+              ...task,
+              isCompleted: nextCompleted,
+              completedAt: nextCompleted ? new Date().toISOString() : undefined,
+            };
+          }
+          return task;
+        });
+
+        const completedCount = updatedTasks.filter((t) => t.isCompleted).length;
+        const isDayCompleted = completedCount >= 2; // %70+ (en az 2/3 görev)
+
+        const updatedPlan: DailyPlanRecord = {
+          ...plan,
+          tasks: updatedTasks,
+          isDayCompleted,
+        };
+
+        // Eğer günün görevlerinden en az biri tamamlandıysa streak güncelle
+        let updatedProfile = prev.userProfile;
+        if (updatedProfile && completedCount > 0) {
+          const today = getTodayDateString();
+          const { newStreak, updatedLastActive } = calculateUpdatedStreak(
+            updatedProfile.lastActiveDate,
+            updatedProfile.streakCount,
+            today
+          );
+          updatedProfile = {
+            ...updatedProfile,
+            streakCount: newStreak,
+            lastActiveDate: updatedLastActive,
+          };
+        }
+
+        return {
+          ...prev,
+          userProfile: updatedProfile,
+          dailyPlans: {
+            ...prev.dailyPlans,
+            [date]: updatedPlan,
+          },
+        };
+      });
+    },
+    [persistUpdate]
+  );
+
+  const regenerateTodayPlan = useCallback(() => {
+    persistUpdate((prev) => {
+      const today = getTodayDateString();
+      const newPlan = generateDailyPlanForDate(today, prev.topicProgress, prev.userProfile);
+      return {
+        ...prev,
+        dailyPlans: {
+          ...prev.dailyPlans,
+          [today]: newPlan,
+        },
+      };
+    });
+  }, [persistUpdate]);
+
+  // ─── Konu İlerleme ve Leitner ──────────────────────────────────
 
   const getProgress = useCallback(
     (topicId: string): TopicProgress => {
@@ -155,7 +308,6 @@ export function useKpssStore() {
     [updateTopicProgress]
   );
 
-  // Leitner: Başarılı -> bir sonraki kutu
   const leitnerSuccess = useCallback(
     (topicId: string) => {
       persistUpdate((prev) => {
@@ -181,7 +333,6 @@ export function useKpssStore() {
     [persistUpdate]
   );
 
-  // Leitner: Tekrar gerekli -> kutu 0'a dön
   const leitnerFail = useCallback(
     (topicId: string) => {
       persistUpdate((prev) => {
@@ -211,10 +362,27 @@ export function useKpssStore() {
 
   const addDailySession = useCallback(
     (session: DailySession) => {
-      persistUpdate((prev) => ({
-        ...prev,
-        dailySessions: [...prev.dailySessions.slice(-89), session],
-      }));
+      persistUpdate((prev) => {
+        const today = getTodayDateString();
+        let updatedProfile = prev.userProfile;
+        if (updatedProfile) {
+          const { newStreak, updatedLastActive } = calculateUpdatedStreak(
+            updatedProfile.lastActiveDate,
+            updatedProfile.streakCount,
+            today
+          );
+          updatedProfile = {
+            ...updatedProfile,
+            streakCount: newStreak,
+            lastActiveDate: updatedLastActive,
+          };
+        }
+        return {
+          ...prev,
+          userProfile: updatedProfile,
+          dailySessions: [...prev.dailySessions.slice(-89), session],
+        };
+      });
     },
     [persistUpdate]
   );
@@ -222,6 +390,14 @@ export function useKpssStore() {
   return {
     store,
     mounted,
+    userProfile: store.userProfile,
+    dailyPlans: store.dailyPlans,
+    saveUserProfile,
+    updateUserProfile,
+    resetUserProfile,
+    getTodayPlan,
+    toggleDailyTask,
+    regenerateTodayPlan,
     getProgress,
     updateTopicProgress,
     updateStatus,
